@@ -1,0 +1,513 @@
+name: Adaptive CI/CD Pipeline
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: "Force deploy even on non-main branch"
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Optional: point these at your deployed relay (see relay/README.md) to
+  # power the LIVE dashboard. Pipeline runs fine with these unset — every
+  # report.js call is a silent no-op when RELAY_URL is empty.
+  RELAY_URL:    ${{ secrets.RELAY_URL }}
+  RELAY_SECRET: ${{ secrets.RELAY_SECRET }}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 1 — DETECT
+# Runs detect.js to understand what kind of project this is.
+# All subsequent jobs read from its outputs.
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  detect:
+    name: 🔍 Detect Project
+    runs-on: ubuntu-latest
+    outputs:
+      profile:           ${{ steps.analyze.outputs.profile }}
+      type:              ${{ steps.parse.outputs.type }}
+      language:          ${{ steps.parse.outputs.language }}
+      packageManager:    ${{ steps.parse.outputs.packageManager }}
+      hasTests:          ${{ steps.parse.outputs.hasTests }}
+      hasLint:           ${{ steps.parse.outputs.hasLint }}
+      hasBuild:          ${{ steps.parse.outputs.hasBuild }}
+      hasDocker:         ${{ steps.parse.outputs.hasDocker }}
+      hasTypecheck:      ${{ steps.parse.outputs.hasTypecheck }}
+      deployTarget:      ${{ steps.parse.outputs.deployTarget }}
+      testFramework:     ${{ steps.parse.outputs.testFramework }}
+      isMonorepo:        ${{ steps.parse.outputs.isMonorepo }}
+      shouldDeploy:      ${{ steps.parse.outputs.shouldDeploy }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Analyze project
+        id: analyze
+        run: node .ci/detect.js
+
+      - name: Parse profile into individual outputs
+        id: parse
+        run: |
+          PROFILE='${{ steps.analyze.outputs.profile }}'
+
+          echo "type=$(echo $PROFILE | node -pe 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).type')" >> $GITHUB_OUTPUT
+          echo "language=$(echo $PROFILE | node -pe 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).language')" >> $GITHUB_OUTPUT
+          echo "packageManager=$(echo $PROFILE | node -pe 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).packageManager')" >> $GITHUB_OUTPUT
+          echo "hasTests=$(echo $PROFILE | node -pe 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).hasTests')" >> $GITHUB_OUTPUT
+          echo "hasLint=$(echo $PROFILE | node -pe 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).hasLint')" >> $GITHUB_OUTPUT
+          echo "hasBuild=$(echo $PROFILE | node -pe 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).hasBuild')" >> $GITHUB_OUTPUT
+          echo "hasDocker=$(echo $PROFILE | node -pe 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).hasDocker')" >> $GITHUB_OUTPUT
+          echo "hasTypecheck=$(echo $PROFILE | node -pe 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).hasTypecheck')" >> $GITHUB_OUTPUT
+          echo "deployTarget=$(echo $PROFILE | node -pe 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).deployTarget')" >> $GITHUB_OUTPUT
+          echo "testFramework=$(echo $PROFILE | node -pe 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).testFramework')" >> $GITHUB_OUTPUT
+          echo "isMonorepo=$(echo $PROFILE | node -pe 'JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")).monorepo !== null')" >> $GITHUB_OUTPUT
+
+          # Determine if we should deploy
+          BRANCH="${{ github.ref_name }}"
+          FORCE="${{ inputs.force_deploy }}"
+          SHOULD_DEPLOY="false"
+          if [[ "$BRANCH" == "main" || "$BRANCH" == "master" || "$FORCE" == "true" ]]; then
+            SHOULD_DEPLOY="true"
+          fi
+          echo "shouldDeploy=$SHOULD_DEPLOY" >> $GITHUB_OUTPUT
+
+      - name: Print detected profile
+        run: |
+          echo "### 🔍 Project Profile" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.analyze.outputs.profile }}' | node -pe 'JSON.stringify(JSON.parse(require("fs").readFileSync("/dev/stdin","utf8")), null, 2)' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Report to live dashboard
+        if: always()
+        run: node .ci/stages/report.js detect ${{ job.status }}
+        env:
+          CI_PROFILE: ${{ steps.analyze.outputs.profile }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PHASE 2 — INSTALL & CACHE
+  # Detects the right package manager and caches accordingly.
+  # ─────────────────────────────────────────────────────────────────────────────
+  install:
+    name: 📦 Install Dependencies
+    needs: detect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: needs.detect.outputs.language == 'javascript'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Python
+        if: needs.detect.outputs.language == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Go
+        if: needs.detect.outputs.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Cache - npm
+        if: needs.detect.outputs.packageManager == 'npm'
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: npm-
+
+      - name: Cache - pnpm
+        if: needs.detect.outputs.packageManager == 'pnpm'
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: pnpm-
+
+      - name: Cache - yarn
+        if: needs.detect.outputs.packageManager == 'yarn'
+        uses: actions/cache@v4
+        with:
+          path: ~/.yarn/cache
+          key: yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: yarn-
+
+      - name: Cache - Python venv
+        if: needs.detect.outputs.language == 'python'
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: python-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') }}
+
+      - name: Cache - Go modules
+        if: needs.detect.outputs.language == 'go'
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-${{ hashFiles('**/go.sum') }}
+
+      - name: Install (npm)
+        if: needs.detect.outputs.packageManager == 'npm'
+        run: npm ci
+
+      - name: Install (pnpm)
+        if: needs.detect.outputs.packageManager == 'pnpm'
+        run: |
+          npm install -g pnpm
+          pnpm install --frozen-lockfile
+
+      - name: Install (yarn)
+        if: needs.detect.outputs.packageManager == 'yarn'
+        run: yarn install --frozen-lockfile
+
+      - name: Install (bun)
+        if: needs.detect.outputs.packageManager == 'bun'
+        run: |
+          curl -fsSL https://bun.sh/install | bash
+          bun install --frozen-lockfile
+
+      - name: Install (python)
+        if: needs.detect.outputs.language == 'python'
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f pyproject.toml ]; then pip install -e ".[dev]"; fi
+
+      - name: Install (go)
+        if: needs.detect.outputs.language == 'go'
+        run: go mod download
+
+      - name: Upload node_modules
+        if: needs.detect.outputs.language == 'javascript'
+        uses: actions/upload-artifact@v4
+        with:
+          name: node_modules
+          path: node_modules
+          retention-days: 1
+
+      - name: Report to live dashboard
+        if: always()
+        run: node .ci/stages/report.js install ${{ job.status }}
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PHASE 3a — LINT (conditional)
+  # ─────────────────────────────────────────────────────────────────────────────
+  lint:
+    name: 🔎 Lint & Format
+    needs: [detect, install]
+    if: needs.detect.outputs.hasLint == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+          path: node_modules
+      - name: Run linter
+        run: node .ci/stages/lint.js
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+
+      - name: Report to live dashboard
+        if: always()
+        run: node .ci/stages/report.js lint ${{ job.status }}
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PHASE 3b — TYPECHECK (conditional)
+  # ─────────────────────────────────────────────────────────────────────────────
+  typecheck:
+    name: 🔷 TypeScript Check
+    needs: [detect, install]
+    if: needs.detect.outputs.hasTypecheck == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+          path: node_modules
+      - run: npx tsc --noEmit
+
+      - name: Report to live dashboard
+        if: always()
+        run: node .ci/stages/report.js typecheck ${{ job.status }}
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PHASE 3c — TEST (conditional)
+  # ─────────────────────────────────────────────────────────────────────────────
+  test:
+    name: 🧪 Test
+    needs: [detect, install]
+    if: needs.detect.outputs.hasTests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        if: needs.detect.outputs.language == 'javascript'
+        with:
+          name: node_modules
+          path: node_modules
+      - name: Run tests
+        run: node .ci/stages/test.js
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+          CI: true
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 7
+
+      - name: Report to live dashboard
+        if: always()
+        run: node .ci/stages/report.js test ${{ job.status }}
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PHASE 3d — SECURITY (always)
+  # ─────────────────────────────────────────────────────────────────────────────
+  security:
+    name: 🛡️ Security Audit
+    needs: [detect, install]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        if: needs.detect.outputs.language == 'javascript'
+        with:
+          name: node_modules
+          path: node_modules
+      - name: Run security scan
+        run: node .ci/stages/security.js
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+
+      - name: Report to live dashboard
+        if: always()
+        run: node .ci/stages/report.js security ${{ job.status }}
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PHASE 4 — BUILD
+  # ─────────────────────────────────────────────────────────────────────────────
+  build:
+    name: 🔨 Build
+    needs: [detect, install, lint, typecheck, test]
+    if: |
+      always() &&
+      needs.detect.outputs.hasBuild == 'true' &&
+      (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
+      (needs.typecheck.result == 'success' || needs.typecheck.result == 'skipped') &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        if: needs.detect.outputs.language == 'javascript'
+        with:
+          name: node_modules
+          path: node_modules
+      - name: Build project
+        run: node .ci/stages/build.js
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+          NODE_ENV: production
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: |
+            dist/
+            .next/
+            out/
+            build/
+          retention-days: 1
+          if-no-files-found: ignore
+
+      - name: Report to live dashboard
+        if: always()
+        run: node .ci/stages/report.js build ${{ job.status }}
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PHASE 5 — DOCKER BUILD (conditional)
+  # ─────────────────────────────────────────────────────────────────────────────
+  docker:
+    name: 🐳 Docker Build
+    needs: [detect, build]
+    if: needs.detect.outputs.hasDocker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: .
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: needs.detect.outputs.shouldDeploy == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ needs.detect.outputs.shouldDeploy == 'true' }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report to live dashboard
+        if: always()
+        run: node .ci/stages/report.js docker ${{ job.status }}
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PHASE 6 — DEPLOY (conditional on branch + target)
+  # ─────────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: 🚀 Deploy
+    needs: [detect, build]
+    if: needs.detect.outputs.shouldDeploy == 'true' && needs.detect.outputs.deployTarget != 'none'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: .
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: node_modules
+          path: node_modules
+        continue-on-error: true
+      - name: Deploy
+        run: node .ci/stages/deploy.js
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+
+      - name: Report to live dashboard
+        if: always()
+        run: node .ci/stages/report.js deploy ${{ job.status }}
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PHASE 7 — NOTIFY
+  # ─────────────────────────────────────────────────────────────────────────────
+  notify:
+    name: 📣 Notify
+    needs: [detect, build, deploy]
+    if: always() && needs.detect.outputs.shouldDeploy == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Send notification
+        run: node .ci/stages/notify.js
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+          PIPELINE_STATUS: ${{ needs.deploy.result }}
+          BUILD_STATUS: ${{ needs.build.result }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Report final pipeline status to live dashboard
+        if: always()
+        run: node .ci/stages/report.js pipeline ${{ needs.deploy.result == 'success' && 'success' || needs.deploy.result == 'skipped' && 'success' || 'failed' }}
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PHASE 8 — FINALIZE (always runs, even on branches that skip deploy/notify)
+  # Ensures the live dashboard always sees a terminal "pipeline" status.
+  # ─────────────────────────────────────────────────────────────────────────────
+  finalize:
+    name: 🏁 Finalize
+    needs: [detect, lint, typecheck, test, security, build, docker, deploy]
+    if: always() && needs.detect.outputs.shouldDeploy != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report final pipeline status to live dashboard
+        run: |
+          STATUS="success"
+          for r in "${{ needs.lint.result }}" "${{ needs.typecheck.result }}" "${{ needs.test.result }}" "${{ needs.build.result }}"; do
+            if [[ "$r" == "failure" ]]; then STATUS="failed"; fi
+          done
+          node .ci/stages/report.js pipeline "$STATUS"
+        env:
+          CI_PROFILE: ${{ needs.detect.outputs.profile }}

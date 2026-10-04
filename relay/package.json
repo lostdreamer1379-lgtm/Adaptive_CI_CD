@@ -1,0 +1,12 @@
+{
+  "name": "adaptive-cicd-relay",
+  "version": "1.0.0",
+  "description": "Tiny relay bridging GitHub Actions to the Adaptive CI/CD live dashboard",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,1633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Adaptive CI/CD — Pipeline Inspector</title>
+<style>
+  :root {
+    --bg:        #0d1117;
+    --surface:   #161b22;
+    --surface2:  #1c2230;
+    --border:    #30363d;
+    --accent:    #58a6ff;
+    --accent2:   #3fb950;
+    --warn:      #d29922;
+    --danger:    #f85149;
+    --text:      #e6edf3;
+    --muted:     #8b949e;
+    --purple:    #bc8cff;
+    --teal:      #39d0d8;
+    --radius:    8px;
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    --font-ui:   'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+
+  /* ── Layout ── */
+  .app { display: grid; grid-template-rows: auto 1fr; min-height: 100vh; }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: -.3px;
+  }
+
+  .logo-icon {
+    width: 28px; height: 28px;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px;
+  }
+
+  .header-badge {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    background: rgba(88,166,255,.12);
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 20px;
+    border: 1px solid rgba(88,166,255,.25);
+  }
+
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+
+  .tab-bar {
+    display: flex;
+    gap: 4px;
+    padding: 0 32px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tab {
+    padding: 10px 16px;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color .15s, border-color .15s;
+    background: none;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+    font-family: var(--font-ui);
+  }
+
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  main { padding: 28px 32px; max-width: 1200px; margin: 0 auto; width: 100%; }
+
+  /* ── Sections ── */
+  .section { display: none; }
+  .section.active { display: block; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .card-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .card-body { padding: 18px; }
+
+  /* ── Simulator ── */
+  .sim-layout {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+
+  .sim-form { display: flex; flex-direction: column; gap: 14px; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+
+  label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+
+  select, input[type=text], input[type=number] {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-family: var(--font-ui);
+    outline: none;
+    width: 100%;
+    transition: border-color .15s;
+  }
+
+  select:focus, input:focus { border-color: var(--accent); }
+
+  .toggle-group { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 5px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    transition: all .15s;
+    user-select: none;
+  }
+
+  .toggle.on {
+    background: rgba(88,166,255,.1);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .toggle input { display: none; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 16px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all .15s;
+    border: none;
+    font-family: var(--font-ui);
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #0d1117;
+  }
+  .btn-primary:hover { background: #79b8ff; }
+
+  .btn-ghost {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Pipeline Visualization ── */
+  .pipeline-viz {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .phase {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .phase-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: var(--muted);
+    margin-bottom: 8px;
+    padding-left: 4px;
+  }
+
+  .phase-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+
+  .phase-connector {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    color: var(--muted);
+    font-size: 18px;
+    margin-bottom: 4px;
+  }
+
+  .job {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    min-width: 120px;
+    position: relative;
+    transition: all .2s;
+    flex: 1;
+  }
+
+  .job.skipped {
+    opacity: .35;
+    background: transparent;
+    border-style: dashed;
+  }
+
+  .job.running { border-color: var(--accent); background: rgba(88,166,255,.06); }
+  .job.success { border-color: var(--accent2); background: rgba(63,185,80,.06); }
+  .job.failed  { border-color: var(--danger);  background: rgba(248,81,73,.06); }
+
+  .job-icon { font-size: 18px; }
+
+  .job-name {
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .job-detail {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+
+  .job-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-family: var(--font-mono);
+    align-self: flex-start;
+  }
+
+  .badge-skip  { background: rgba(139,148,158,.15); color: var(--muted); }
+  .badge-run   { background: rgba(88,166,255,.15);  color: var(--accent); }
+  .badge-ok    { background: rgba(63,185,80,.15);   color: var(--accent2); }
+  .badge-fail  { background: rgba(248,81,73,.15);   color: var(--danger); }
+
+  /* ── Profile display ── */
+  .profile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+  }
+
+  .profile-item {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+  }
+
+  .profile-key {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  .profile-val {
+    font-size: 13px;
+    font-family: var(--font-mono);
+    color: var(--teal);
+    word-break: break-all;
+  }
+
+  .profile-val.bool-true  { color: var(--accent2); }
+  .profile-val.bool-false { color: var(--muted); }
+
+  /* ── Code view ── */
+  .code-block {
+    background: #010409;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.7;
+    color: #e6edf3;
+    white-space: pre;
+  }
+
+  .code-block .k { color: #ff7b72; }   /* keyword */
+  .code-block .s { color: #a5d6ff; }   /* string */
+  .code-block .c { color: #8b949e; }   /* comment */
+  .code-block .n { color: #79c0ff; }   /* name */
+  .code-block .v { color: #56d364; }   /* value */
+
+  /* ── File tree ── */
+  .file-tree { font-family: var(--font-mono); font-size: 13px; }
+
+  .tree-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    cursor: pointer;
+    color: var(--text);
+    border-radius: 4px;
+  }
+
+  .tree-item:hover { color: var(--accent); }
+  .tree-item.dir { color: var(--accent); }
+  .tree-item.indent-1 { padding-left: 18px; }
+  .tree-item.indent-2 { padding-left: 36px; }
+  .tree-item.indent-3 { padding-left: 54px; }
+  .tree-item .fi { font-size: 14px; width: 16px; flex-shrink: 0; }
+
+  /* ── Stage log ── */
+  .log {
+    background: #010409;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 18px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.8;
+    height: 280px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+
+  .log .ok   { color: var(--accent2); }
+  .log .info { color: var(--accent); }
+  .log .warn { color: var(--warn); }
+  .log .err  { color: var(--danger); }
+  .log .cmd  { color: var(--purple); }
+  .log .dim  { color: var(--muted); }
+
+  /* ── Spinners ── */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    vertical-align: middle;
+  }
+
+  @keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.4 } }
+  .pulse { animation: pulse 1.4s ease-in-out infinite; }
+
+  /* ── Grid helpers ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .mt { margin-top: 16px; }
+  .mt-sm { margin-top: 10px; }
+  .gap { display: flex; flex-direction: column; gap: 14px; }
+
+  /* ── Stat cards ── */
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+  }
+
+  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .stat-val   { font-size: 26px; font-weight: 700; margin-top: 4px; font-family: var(--font-mono); }
+  .stat-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    header { padding: 12px 16px; }
+    .tab-bar { padding: 0 16px; }
+    main { padding: 16px; }
+    .sim-layout { grid-template-columns: 1fr; }
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  }
+
+  /* ── Live run cards ── */
+  .run-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .run-card-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .run-status-dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .run-status-dot.running { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+  .run-status-dot.success { background: var(--accent2); }
+  .run-status-dot.failed  { background: var(--danger); }
+
+  .run-meta {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+
+  .run-meta a { color: var(--accent); text-decoration: none; }
+  .run-meta a:hover { text-decoration: underline; }
+
+  .run-jobs {
+    padding: 12px 16px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .run-job-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    padding: 5px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    font-family: var(--font-mono);
+  }
+
+  .run-job-pill.success { border-color: rgba(63,185,80,.4); color: var(--accent2); }
+  .run-job-pill.failed  { border-color: rgba(248,81,73,.4); color: var(--danger); }
+  .run-job-pill.running { border-color: rgba(88,166,255,.4); color: var(--accent); }
+  .run-job-pill.queued  { color: var(--muted); }
+
+  .live-banner {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(63,185,80,.15);
+    color: var(--accent2);
+    border: 1px solid rgba(63,185,80,.3);
+  }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    Adaptive CI/CD
+  </div>
+  <span class="header-badge">Pipeline Inspector</span>
+  <div class="header-right">
+    <span id="runStatus" style="font-size:12px;color:var(--muted)">Configure a project to simulate</span>
+  </div>
+</header>
+
+<div class="tab-bar">
+  <button class="tab" onclick="switchTab('live')" id="tabbtn-live">🟢 Live</button>
+  <button class="tab active" onclick="switchTab('simulate')">🔬 Simulate</button>
+  <button class="tab" onclick="switchTab('files')">📁 Files</button>
+  <button class="tab" onclick="switchTab('docs')">📖 How It Works</button>
+</div>
+
+<!-- ─── LIVE ─────────────────────────────────────────────────────── -->
+<main>
+<div id="tab-live" class="section">
+
+  <!-- Not connected yet -->
+  <div id="liveSetup" class="card" style="max-width:640px">
+    <div class="card-header">🟢 Connect to your live pipeline</div>
+    <div class="card-body gap">
+      <p style="font-size:13px;color:var(--muted);line-height:1.7">
+        This pulls real status from your own GitHub Actions runs — not a simulation.
+        It needs a small relay deployed between GitHub and this page
+        (GitHub can push to it; this page can't call GitHub's API directly).
+        Takes about 2 minutes. Full instructions are in <code style="font-family:var(--font-mono);color:var(--teal)">relay/README.md</code>
+        in your downloaded project — short version below.
+      </p>
+
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;font-size:13px;color:var(--muted);line-height:1.8">
+        <strong style="color:var(--text)">1.</strong> Deploy <code style="font-family:var(--font-mono);color:var(--teal)">relay/</code> to Fly.io/Railway/Render (free tier, ~2 min) — gives you a URL like <code style="font-family:var(--font-mono);color:var(--teal)">https://your-relay.fly.dev</code><br>
+        <strong style="color:var(--text)">2.</strong> Add <code style="font-family:var(--font-mono);color:var(--teal)">RELAY_URL</code> and <code style="font-family:var(--font-mono);color:var(--teal)">RELAY_SECRET</code> as GitHub Actions secrets in your repo<br>
+        <strong style="color:var(--text)">3.</strong> Paste the same relay URL below and connect
+      </div>
+
+      <div class="field">
+        <label>Relay URL</label>
+        <input type="text" id="relayUrlInput" placeholder="https://your-relay.fly.dev">
+      </div>
+
+      <button class="btn btn-primary" onclick="connectRelay()" style="justify-content:center">
+        🔌 Connect
+      </button>
+
+      <div id="relayError" style="display:none;font-size:12px;color:var(--danger);background:rgba(248,81,73,.08);border:1px solid rgba(248,81,73,.25);border-radius:var(--radius);padding:10px 12px"></div>
+    </div>
+  </div>
+
+  <!-- Connected — live view -->
+  <div id="liveConnected" style="display:none">
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header" style="justify-content:space-between">
+        <span>🟢 Connected — <span id="liveRelayUrl" style="color:var(--muted);font-weight:400;font-family:var(--font-mono);font-size:12px"></span></span>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span id="liveConnDot" style="width:8px;height:8px;border-radius:50%;background:var(--accent2)"></span>
+          <span id="liveConnState" style="font-size:12px;color:var(--muted)">polling every 4s</span>
+          <button class="btn btn-ghost" onclick="disconnectRelay()" style="padding:5px 10px;font-size:11px">Disconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="liveEmpty" class="card" style="display:none">
+      <div class="card-body" style="text-align:center;padding:40px 20px;color:var(--muted);font-size:13px">
+        Connected — waiting for your first pipeline run.<br>
+        Push a commit to trigger <code style="font-family:var(--font-mono);color:var(--teal)">adaptive.yml</code> and it'll appear here within seconds.
+      </div>
+    </div>
+
+    <div id="liveRuns" class="gap"></div>
+  </div>
+
+</div>
+
+<!-- ─── SIMULATE ─────────────────────────────────────────────────── -->
+<div id="tab-simulate" class="section active">
+  <div class="sim-layout">
+
+    <!-- LEFT: Configuration -->
+    <div class="gap">
+      <div class="card">
+        <div class="card-header">🎛️ Project Configuration</div>
+        <div class="card-body gap">
+
+          <div class="field">
+            <label>Project Type</label>
+            <select id="cfg-type" onchange="onTypeChange()">
+              <option value="react">React (Vite)</option>
+              <option value="nextjs">Next.js</option>
+              <option value="vue">Vue 3</option>
+              <option value="nuxt">Nuxt 3</option>
+              <option value="svelte">SvelteKit</option>
+              <option value="node-api">Node.js API</option>
+              <option value="python">Python</option>
+              <option value="go">Go</option>
+              <option value="rust">Rust</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Package Manager</label>
+            <select id="cfg-pm">
+              <option value="pnpm">pnpm</option>
+              <option value="npm">npm</option>
+              <option value="yarn">yarn</option>
+              <option value="bun">bun</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Test Framework</label>
+            <select id="cfg-test">
+              <option value="vitest">Vitest</option>
+              <option value="jest">Jest</option>
+              <option value="playwright">Playwright</option>
+              <option value="pytest">pytest</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Deploy Target</label>
+            <select id="cfg-deploy">
+              <option value="vercel">Vercel</option>
+              <option value="netlify">Netlify</option>
+              <option value="fly">Fly.io</option>
+              <option value="railway">Railway</option>
+              <option value="docker">Docker / GHCR</option>
+              <option value="kubernetes">Kubernetes</option>
+              <option value="aws">AWS</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Coverage Threshold (%)</label>
+            <input type="number" id="cfg-coverage" value="80" min="0" max="100">
+          </div>
+
+          <div class="field">
+            <label>Features</label>
+            <div class="toggle-group">
+              <label class="toggle on" id="tog-ts">
+                <input type="checkbox" checked onchange="toggleFeature(this,'tog-ts')">
+                TypeScript
+              </label>
+              <label class="toggle on" id="tog-lint">
+                <input type="checkbox" checked onchange="toggleFeature(this,'tog-lint')">
+                ESLint
+              </label>
+              <label class="toggle" id="tog-docker">
+                <input type="checkbox" onchange="toggleFeature(this,'tog-docker')">
+                Docker
+              </label>
+              <label class="toggle" id="tog-monorepo">
+                <input type="checkbox" onchange="toggleFeature(this,'tog-monorepo')">
+                Monorepo
+              </label>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Branch</label>
+            <select id="cfg-branch">
+              <option value="main">main (→ deploy)</option>
+              <option value="develop">develop (→ no deploy)</option>
+              <option value="feature">feature/xyz (→ no deploy)</option>
+            </select>
+          </div>
+
+          <button class="btn btn-primary" onclick="runSimulation()" style="width:100%;justify-content:center">
+            ▶ Run Pipeline Simulation
+          </button>
+        </div>
+      </div>
+
+      <!-- Profile card -->
+      <div class="card" id="profileCard" style="display:none">
+        <div class="card-header">🔍 Detected Profile</div>
+        <div class="card-body">
+          <div class="profile-grid" id="profileGrid"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Pipeline visualization -->
+    <div class="gap">
+      <div class="card">
+        <div class="card-header" style="justify-content:space-between">
+          <span>⚡ Pipeline Execution</span>
+          <span id="pipelineMeta" style="font-size:11px;color:var(--muted);font-family:var(--font-mono)"></span>
+        </div>
+        <div class="card-body">
+          <div class="pipeline-viz" id="pipelineViz">
+            <div style="color:var(--muted);font-size:13px;padding:20px 0">
+              Configure your project and click <strong style="color:var(--text)">Run Pipeline Simulation</strong> to see the adaptive pipeline in action.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="logCard" style="display:none">
+        <div class="card-header">📋 Stage Log</div>
+        <div class="card-body">
+          <div class="log" id="logOutput"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ─── FILES ────────────────────────────────────────────────────── -->
+<div id="tab-files" class="section">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header">📁 Repository Structure</div>
+      <div class="card-body">
+        <div class="file-tree" id="fileTree"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header" id="fileViewTitle">📄 File Preview</div>
+      <div class="card-body" style="padding:0">
+        <div class="code-block" id="fileViewContent" style="border:none;border-radius:0;margin:0;height:500px">Select a file to preview</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── DOCS ─────────────────────────────────────────────────────── -->
+<div id="tab-docs" class="section">
+  <div style="max-width:720px;display:flex;flex-direction:column;gap:20px">
+
+    <div class="card">
+      <div class="card-header">🧠 How the Intelligence Works</div>
+      <div class="card-body gap">
+        <p style="font-size:14px;color:var(--muted);line-height:1.7">
+          The pipeline runs a <strong style="color:var(--text)">detect.js</strong> script as its very first step.
+          It scans the repo and emits a JSON profile that every subsequent stage reads from.
+          No project-specific config files are ever needed — the pipeline adapts itself.
+        </p>
+
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px">
+            <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:6px">Detection signals used</div>
+            <div style="font-size:13px;color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:6px">
+              <span>📦 package.json deps → framework</span>
+              <span>🔒 lockfile type → package manager</span>
+              <span>🧪 test deps → test framework</span>
+              <span>🔷 tsconfig.json → TypeScript</span>
+              <span>🐳 Dockerfile → Docker build</span>
+              <span>▲ vercel.json → Vercel deploy</span>
+              <span>🐦 fly.toml → Fly.io deploy</span>
+              <span>📁 packages/ dir → monorepo</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">🟢 Making the Live tab actually live</div>
+      <div class="card-body gap">
+        <p style="font-size:14px;color:var(--muted);line-height:1.7">
+          This page can't call GitHub's API directly — its sandbox only allows outbound
+          requests to a few script CDNs, not <code style="font-family:var(--font-mono);color:var(--teal)">api.github.com</code>.
+          So real-time status needs a small relay in between: GitHub Actions pushes job
+          status to it, and this page polls or streams from it instead.
+        </p>
+        <div class="code-block">cd relay && fly launch --now
+fly secrets set RELAY_SECRET=$(openssl rand -hex 32)
+<span class="c"># → gives you https://your-app.fly.dev</span>
+
+<span class="c"># Then in your GitHub repo's Actions secrets:</span>
+RELAY_URL=https://your-app.fly.dev
+RELAY_SECRET=&lt;same value&gt;</div>
+        <p style="font-size:13px;color:var(--muted)">Full details in <code style="font-family:var(--font-mono);color:var(--teal)">relay/README.md</code>. Without this setup, the pipeline still runs fine — only the Live tab stays disconnected.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">🚀 Quick Start</div>
+      <div class="card-body">
+        <div class="code-block"><span class="c"># 1. Copy the .ci folder and workflow into your project</span>
+cp -r adaptive-cicd/.ci  your-project/
+cp -r adaptive-cicd/.github  your-project/
+
+<span class="c"># 2. Commit and push</span>
+git add .ci .github
+git commit -m "chore: add adaptive CI/CD pipeline"
+git push
+
+<span class="c"># 3. The pipeline auto-detects everything on the next push.
+# No configuration needed.</span></div>
+
+        <div style="margin-top:14px;padding:12px 16px;background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.2);border-radius:var(--radius);font-size:13px">
+          💡 <strong>Tip:</strong> Run <code style="font-family:var(--font-mono);color:var(--teal)">node .ci/detect.js</code> locally to see exactly what the pipeline will detect before pushing.
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">⚠️ Known Limitations</div>
+      <div class="card-body gap">
+        <p style="font-size:13px;color:var(--muted);line-height:1.7">
+          This simulator is for previewing adaptive behavior before you push — it is
+          <strong style="color:var(--text)">not live-connected to your actual GitHub Actions runs</strong>.
+          Real job output, pass/fail status, and timing only exist in the GitHub Actions tab
+          of your repo. See <code style="font-family:var(--font-mono);color:var(--teal)">CAPABILITIES.md</code>
+          for the full list — notably: no blue-green/canary deploys, no automatic rollback,
+          no DB service containers for tests, monorepo detection is file-diff based (not
+          dependency-graph aware), and GitHub Actions is the only supported CI platform.
+        </p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">🔑 Required GitHub Secrets</div>
+      <div class="card-body">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:8px 0;color:var(--muted);font-size:11px;text-transform:uppercase">Secret</th>
+              <th style="text-align:left;padding:8px 0;color:var(--muted);font-size:11px;text-transform:uppercase">When needed</th>
+            </tr>
+          </thead>
+          <tbody id="secretsTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</main>
+</div>
+
+<script>
+// ─── State ───────────────────────────────────────────────────────────────────
+
+let features = { ts: true, lint: true, docker: false, monorepo: false };
+let simRunning = false;
+
+// ─── Tab switching ────────────────────────────────────────────────────────────
+
+function switchTab(id) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names = ['live','simulate','files','docs'];
+    t.classList.toggle('active', names[i] === id);
+  });
+  document.querySelectorAll('.section').forEach(s => {
+    s.classList.toggle('active', s.id === 'tab-' + id);
+  });
+  if (id === 'files') renderFileTree();
+  if (id === 'docs') renderSecrets();
+}
+
+// ─── Toggle features ─────────────────────────────────────────────────────────
+
+function toggleFeature(el, id) {
+  const key = id.replace('tog-','');
+  features[key] = el.checked;
+  document.getElementById(id).classList.toggle('on', el.checked);
+
+  const type = document.getElementById('cfg-type').value;
+  if (key === 'monorepo') {
+    document.getElementById('cfg-pm').value = features.monorepo ? 'pnpm' : 'npm';
+  }
+}
+
+function onTypeChange() {
+  const type = document.getElementById('cfg-type').value;
+  const testSel = document.getElementById('cfg-test');
+
+  if (type === 'python') {
+    testSel.value = 'pytest';
+    features.ts = false;
+    document.getElementById('tog-ts').classList.remove('on');
+    document.getElementById('tog-ts').querySelector('input').checked = false;
+  } else if (['react','nextjs','vue','nuxt','svelte'].includes(type)) {
+    if (testSel.value === 'pytest') testSel.value = 'vitest';
+    features.ts = true;
+    document.getElementById('tog-ts').classList.add('on');
+    document.getElementById('tog-ts').querySelector('input').checked = true;
+  } else if (type === 'go' || type === 'rust') {
+    testSel.value = 'none';
+    features.ts = false;
+    document.getElementById('tog-ts').classList.remove('on');
+    document.getElementById('tog-ts').querySelector('input').checked = false;
+  }
+}
+
+// ─── Build profile from config ────────────────────────────────────────────────
+
+function buildProfile() {
+  const type     = document.getElementById('cfg-type').value;
+  const pm       = document.getElementById('cfg-pm').value;
+  const test     = document.getElementById('cfg-test').value;
+  const deploy   = document.getElementById('cfg-deploy').value;
+  const coverage = parseInt(document.getElementById('cfg-coverage').value) || 80;
+  const branch   = document.getElementById('cfg-branch').value;
+
+  const isJS = !['python','go','rust'].includes(type);
+
+  const linterMap = { react:'eslint', nextjs:'eslint', vue:'eslint', nuxt:'eslint', svelte:'eslint', 'node-api':'eslint' };
+
+  return {
+    name: 'my-app',
+    type,
+    language: type === 'python' ? 'python' : type === 'go' ? 'go' : type === 'rust' ? 'rust' : 'javascript',
+    isTypescript: features.ts && isJS,
+    packageManager: isJS ? pm : 'n/a',
+    buildTool: { react:'vite', nextjs:'next', vue:'vite', nuxt:'nuxt', svelte:'vite', 'node-api':'tsc' }[type] || 'n/a',
+    testFramework: test === 'none' ? null : test,
+    linter: features.lint && isJS ? (linterMap[type] || null) : null,
+    hasTests: test !== 'none',
+    hasLint: features.lint && isJS,
+    hasBuild: isJS || type === 'go' || type === 'rust',
+    hasDocker: features.docker,
+    hasTypecheck: features.ts && isJS,
+    hasCoverage: test !== 'none',
+    coverageThreshold: coverage,
+    deployTarget: deploy,
+    monorepo: features.monorepo ? { tool: pm } : null,
+    branch,
+    shouldDeploy: branch === 'main',
+    securityTools: ['npm-audit'],
+  };
+}
+
+// ─── Render profile ────────────────────────────────────────────────────────────
+
+function renderProfile(p) {
+  const card = document.getElementById('profileCard');
+  const grid = document.getElementById('profileGrid');
+  card.style.display = '';
+
+  const keys = ['type','language','packageManager','buildTool','testFramework','linter',
+                 'deployTarget','hasTests','hasLint','hasBuild','hasDocker','hasTypecheck','coverageThreshold'];
+  grid.innerHTML = keys.map(k => {
+    const v = p[k];
+    let cls = '';
+    let display = v === null ? '—' : String(v);
+    if (v === true)  cls = 'bool-true';
+    if (v === false) cls = 'bool-false';
+    return `<div class="profile-item">
+      <div class="profile-key">${k}</div>
+      <div class="profile-val ${cls}">${display}</div>
+    </div>`;
+  }).join('');
+}
+
+// ─── Pipeline simulation ───────────────────────────────────────────────────────
+
+const STAGES = [
+  {
+    phase: 'Phase 1 — Detect',
+    jobs: [
+      { id:'detect', icon:'🔍', name:'Detect Project', detail: p => `${p.type} · ${p.language}`, always: true },
+    ]
+  },
+  {
+    phase: 'Phase 2 — Install',
+    jobs: [
+      { id:'install', icon:'📦', name:'Install', detail: p => p.packageManager, always: true },
+    ]
+  },
+  {
+    phase: 'Phase 3 — Quality Gates',
+    jobs: [
+      { id:'lint',      icon:'🔎', name:'Lint',       detail: p => p.linter || 'skipped',     cond: p => p.hasLint },
+      { id:'typecheck', icon:'🔷', name:'TypeScript',  detail: p => 'tsc --noEmit',             cond: p => p.hasTypecheck },
+      { id:'test',      icon:'🧪', name:'Test',        detail: p => p.testFramework || 'none', cond: p => p.hasTests },
+      { id:'security',  icon:'🛡️', name:'Security',    detail: p => 'npm audit',               always: true },
+    ]
+  },
+  {
+    phase: 'Phase 4 — Build',
+    jobs: [
+      { id:'build', icon:'🔨', name:'Build', detail: p => p.buildTool || p.language, cond: p => p.hasBuild },
+    ]
+  },
+  {
+    phase: 'Phase 5 — Container',
+    jobs: [
+      { id:'docker', icon:'🐳', name:'Docker', detail: p => 'ghcr.io push', cond: p => p.hasDocker },
+    ]
+  },
+  {
+    phase: 'Phase 6 — Ship',
+    jobs: [
+      { id:'deploy', icon:'🚀', name:'Deploy', detail: p => p.deployTarget, cond: p => p.shouldDeploy && p.deployTarget !== 'none' },
+      { id:'notify', icon:'📣', name:'Notify', detail: p => 'Slack/Discord',  cond: p => p.shouldDeploy },
+    ]
+  },
+];
+
+function renderPipelineStatic(profile) {
+  const viz = document.getElementById('pipelineViz');
+  viz.innerHTML = '';
+
+  STAGES.forEach((stage, si) => {
+    const phaseEl = document.createElement('div');
+    phaseEl.className = 'phase';
+
+    const label = document.createElement('div');
+    label.className = 'phase-label';
+    label.textContent = stage.phase;
+    phaseEl.appendChild(label);
+
+    const row = document.createElement('div');
+    row.className = 'phase-row';
+
+    stage.jobs.forEach(job => {
+      const active = job.always || (job.cond && job.cond(profile));
+      const el = document.createElement('div');
+      el.className = 'job' + (active ? '' : ' skipped');
+      el.id = 'job-' + job.id;
+      el.innerHTML = `
+        <div class="job-icon">${job.icon}</div>
+        <div class="job-name">${job.name}</div>
+        <div class="job-detail">${job.detail(profile)}</div>
+        <span class="job-badge ${active ? 'badge-run' : 'badge-skip'}">${active ? '● queued' : '○ skipped'}</span>
+      `;
+      row.appendChild(el);
+    });
+
+    phaseEl.appendChild(row);
+    viz.appendChild(phaseEl);
+
+    if (si < STAGES.length - 1) {
+      const conn = document.createElement('div');
+      conn.className = 'phase-connector';
+      conn.textContent = '│';
+      viz.appendChild(conn);
+    }
+  });
+}
+
+async function runSimulation() {
+  if (simRunning) return;
+  simRunning = true;
+
+  const profile = buildProfile();
+  renderProfile(profile);
+  renderPipelineStatic(profile);
+
+  document.getElementById('logCard').style.display = '';
+  const log = document.getElementById('logOutput');
+  log.innerHTML = '';
+  document.getElementById('pipelineMeta').textContent = '';
+
+  function appendLog(html) {
+    log.innerHTML += html + '\n';
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  function setJobState(id, state) {
+    const el = document.getElementById('job-' + id);
+    if (!el) return;
+    el.className = 'job ' + (state === 'skip' ? 'skipped' : state);
+    const badge = el.querySelector('.job-badge');
+    const bMap = { running:'badge-run pulse', success:'badge-ok', failed:'badge-fail', skip:'badge-skip' };
+    const lMap = { running:'● running', success:'✓ success', failed:'✗ failed', skip:'○ skipped' };
+    badge.className = 'job-badge ' + (bMap[state] || 'badge-skip');
+    badge.textContent = lMap[state] || '○ skipped';
+  }
+
+  async function runJob(id, icon, name, commands, durationMs = 1200) {
+    setJobState(id, 'running');
+    appendLog(`<span class="info">${icon} ${name}</span>`);
+    for (const cmd of commands) {
+      appendLog(`<span class="cmd">  ▶ ${cmd}</span>`);
+      await sleep(durationMs / commands.length);
+    }
+    setJobState(id, 'success');
+    appendLog(`<span class="ok">  ✓ ${name} passed</span>`);
+    await sleep(200);
+  }
+
+  const startTime = Date.now();
+
+  appendLog(`<span class="dim">━━━ Adaptive CI/CD Pipeline Started ━━━</span>`);
+  appendLog(`<span class="dim">Project: ${profile.type} · Branch: ${profile.branch}</span>\n`);
+
+  // Phase 1: Detect
+  await runJob('detect','🔍','Detect Project', [
+    `node .ci/detect.js`,
+    `Detected: ${profile.type} · ${profile.language} · ${profile.packageManager}`,
+    `Deploy target: ${profile.deployTarget}`,
+    `Test framework: ${profile.testFramework || 'none'}`
+  ], 900);
+
+  // Phase 2: Install
+  const pmCmd = { pnpm:'pnpm install --frozen-lockfile', yarn:'yarn install --frozen-lockfile', bun:'bun install --frozen-lockfile', npm:'npm ci' };
+  await runJob('install','📦','Install', [
+    `Using ${profile.packageManager}`,
+    pmCmd[profile.packageManager] || 'npm ci',
+    'Restoring cache...',
+    'Dependencies ready'
+  ], 1400);
+
+  // Phase 3: Quality gates (parallel)
+  appendLog(`\n<span class="dim">── Phase 3: Quality Gates (parallel) ──</span>`);
+
+  const gateJobs = [];
+  if (profile.hasLint) gateJobs.push(runJob('lint','🔎','Lint', [`node .ci/stages/lint.js`,`eslint . --ext .ts,.tsx --max-warnings=0`,'No lint errors'], 1100));
+  if (profile.hasTypecheck) gateJobs.push(runJob('typecheck','🔷','TypeScript', ['npx tsc --noEmit','No type errors found'], 1000));
+  if (profile.hasTests)  gateJobs.push(runJob('test','🧪','Test', [`node .ci/stages/test.js`,`${profile.testFramework} run --coverage`,`Coverage: ${profile.coverageThreshold}%+ ✓`], 1600));
+  gateJobs.push(runJob('security','🛡️','Security', ['node .ci/stages/security.js','npm audit','0 high severity vulnerabilities'], 800));
+
+  if (!profile.hasLint) { setJobState('lint','skip'); }
+  if (!profile.hasTypecheck) { setJobState('typecheck','skip'); }
+  if (!profile.hasTests) { setJobState('test','skip'); }
+
+  await Promise.all(gateJobs);
+
+  // Phase 4: Build
+  if (profile.hasBuild) {
+    await runJob('build','🔨','Build', ['node .ci/stages/build.js',`${profile.buildTool || 'build'} --mode production`,'Output: dist/ (gzipped)'], 1500);
+  } else {
+    setJobState('build','skip');
+    appendLog(`<span class="dim">  ○ Build skipped (no build step for ${profile.type})</span>`);
+  }
+
+  // Phase 5: Docker
+  if (profile.hasDocker) {
+    await runJob('docker','🐳','Docker', ['docker buildx build --push','ghcr.io/my-app:latest pushed'], 1200);
+  } else {
+    setJobState('docker','skip');
+  }
+
+  // Phase 6: Deploy + Notify
+  appendLog(`\n<span class="dim">── Phase 6: Ship ──</span>`);
+
+  if (profile.shouldDeploy && profile.deployTarget !== 'none') {
+    const deployCmds = {
+      vercel: ['vercel pull --environment=production','vercel build --prod','vercel deploy --prebuilt --prod'],
+      netlify: ['netlify deploy --prod --dir=dist'],
+      fly: ['fly deploy --remote-only'],
+      railway: ['railway up --detach'],
+      docker: ['Image already pushed in Phase 5'],
+      kubernetes: ['kubectl apply -f k8s/','kubectl rollout status deployment/my-app'],
+      aws: ['aws s3 sync dist/ s3://$BUCKET --delete','aws cloudfront create-invalidation'],
+    };
+    await runJob('deploy','🚀','Deploy', deployCmds[profile.deployTarget] || ['Deploying...'], 1800);
+    await runJob('notify','📣','Notify', ['node .ci/stages/notify.js','✅ Slack notification sent'], 600);
+  } else {
+    setJobState('deploy','skip');
+    setJobState('notify','skip');
+    appendLog(`<span class="dim">  ○ Deploy skipped (branch: ${profile.branch})</span>`);
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  appendLog(`\n<span class="ok">━━━ Pipeline Complete in ${elapsed}s ━━━</span>`);
+  document.getElementById('pipelineMeta').textContent = `Completed in ${elapsed}s`;
+  document.getElementById('runStatus').textContent = `✅ ${profile.type} pipeline completed`;
+  document.getElementById('runStatus').style.color = 'var(--accent2)';
+  simRunning = false;
+}
+
+// ─── File tree ────────────────────────────────────────────────────────────────
+
+const FILES = {
+  '.ci/detect.js': `#!/usr/bin/env node
+/**
+ * Adaptive CI/CD — Project Intelligence Engine
+ * Scans the repo and emits a full profile.
+ */
+const fs = require('fs');
+
+function detectProjectType(pkg) {
+  if (!pkg) {
+    if (fs.existsSync('pyproject.toml')) return 'python';
+    if (fs.existsSync('go.mod'))         return 'go';
+    return 'unknown';
+  }
+  const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+  if (deps['next'])   return 'nextjs';
+  if (deps['react'])  return 'react';
+  if (deps['vue'])    return 'vue';
+  // ... more detection rules
+}
+
+const pkg = readJSON('package.json');
+const profile = {
+  type:          detectProjectType(pkg),
+  packageManager: detectPackageManager(),
+  testFramework:  detectTestFramework(pkg),
+  deployTarget:   detectDeployTarget(),
+  hasDocker:      fs.existsSync('Dockerfile'),
+  // ...and more
+};
+
+// Write to GITHUB_OUTPUT
+const out = \`profile=\${JSON.stringify(profile)}\`;
+fs.appendFileSync(process.env.GITHUB_OUTPUT, out);`,
+
+  '.ci/stages/lint.js': `#!/usr/bin/env node
+const profile = JSON.parse(process.env.CI_PROFILE);
+const { linter, language } = profile;
+
+if (language === 'python') { run('ruff check .'); return; }
+if (language === 'go')     { run('golangci-lint run'); return; }
+
+switch (linter) {
+  case 'biome':  run('npx biome check .'); break;
+  case 'eslint': run('npx eslint . --max-warnings=0'); break;
+  default: console.log('No linter detected');
+}`,
+
+  '.ci/stages/test.js': `#!/usr/bin/env node
+const { testFramework, language, coverageThreshold } = profile;
+
+if (language === 'python') {
+  run(\`pytest --cov=. --cov-fail-under=\${coverageThreshold}\`);
+  return;
+}
+switch (testFramework) {
+  case 'vitest': run(\`vitest run --coverage --coverage.thresholds.lines=\${coverageThreshold}\`); break;
+  case 'jest':   run(\`jest --coverage --coverageThreshold='{"global":{"lines":\${coverageThreshold}}}'\`); break;
+  case 'playwright': run('playwright test'); break;
+}`,
+
+  '.ci/stages/deploy.js': `#!/usr/bin/env node
+const { deployTarget } = profile;
+
+switch (deployTarget) {
+  case 'vercel':     run('vercel deploy --prod --token=$VERCEL_TOKEN'); break;
+  case 'netlify':    run('netlify deploy --prod --dir=dist'); break;
+  case 'fly':        run('fly deploy --remote-only'); break;
+  case 'railway':    run('railway up --detach'); break;
+  case 'kubernetes': run('kubectl apply -f k8s/'); break;
+  case 'docker':     console.log('Handled by docker job'); break;
+  case 'aws':        run('aws s3 sync dist/ s3://$BUCKET --delete'); break;
+  default: console.log('No deploy target detected');
+}`,
+
+  '.ci/stages/report.js': `#!/usr/bin/env node
+/**
+ * Reports job status to the live relay.
+ * No-ops silently if RELAY_URL isn't set — pipeline works fine without it.
+ */
+const RELAY_URL = process.env.RELAY_URL;
+if (!RELAY_URL) process.exit(0);
+
+const [,, job, status, detail] = process.argv;
+const payload = {
+  runId: process.env.GITHUB_RUN_ID,
+  repo: process.env.GITHUB_REPOSITORY,
+  branch: process.env.GITHUB_REF_NAME,
+  commit: (process.env.GITHUB_SHA || '').slice(0, 7),
+  profile: JSON.parse(process.env.CI_PROFILE || 'null'),
+  job, status, detail,
+  runUrl: \`\${process.env.GITHUB_SERVER_URL}/\${process.env.GITHUB_REPOSITORY}/actions/runs/\${process.env.GITHUB_RUN_ID}\`,
+};
+
+// HMAC-signed POST to RELAY_URL/webhook — see relay/server.js for the receiver
+postToRelay(RELAY_URL + '/webhook', payload);`,
+
+  'relay/server.js': `#!/usr/bin/env node
+/**
+ * Adaptive CI/CD — Live Relay
+ * Bridges GitHub Actions to the published dashboard page.
+ * The dashboard's CSP can't call api.github.com directly —
+ * so GitHub pushes status here, and the dashboard polls/streams this instead.
+ */
+const http = require('http');
+
+let runs = new Map(); // runId -> run state
+let clients = new Set(); // SSE subscribers
+
+function handleWebhook(req, res, body) {
+  const event = JSON.parse(body);
+  const existing = runs.get(event.runId) || { ...event, jobs: {} };
+  existing.jobs[event.job] = { status: event.status, detail: event.detail, updatedAt: Date.now() };
+  existing.updatedAt = Date.now();
+  runs.set(event.runId, existing);
+  broadcast({ type: 'update', run: existing });
+  res.writeHead(200).end(JSON.stringify({ ok: true }));
+}
+
+function handleStatus(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  const list = [...runs.values()].sort((a,b) => b.updatedAt - a.updatedAt);
+  res.writeHead(200, {'Content-Type':'application/json'}).end(JSON.stringify({ runs: list }));
+}
+
+// GET /status  — dashboard polls this
+// GET /stream  — dashboard can subscribe here instead (SSE, instant updates)
+// POST /webhook — GitHub Actions reports here (HMAC-signed)
+http.createServer((req, res) => {
+  // ...routes to the handlers above, see full server.js for auth + persistence
+}).listen(process.env.PORT || 8787);`,
+
+  '.github/workflows/adaptive.yml': `name: Adaptive CI/CD Pipeline
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  detect:
+    name: 🔍 Detect Project
+    runs-on: ubuntu-latest
+    outputs:
+      profile: \${{ steps.analyze.outputs.profile }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: node .ci/detect.js
+
+  install:
+    needs: detect
+    # Installs with the right package manager (npm/pnpm/yarn/bun)
+    # and caches node_modules for all downstream jobs
+
+  lint:
+    needs: [detect, install]
+    if: needs.detect.outputs.hasLint == 'true'
+    # Runs ESLint / Biome / ruff / golangci-lint
+
+  test:
+    needs: [detect, install]
+    if: needs.detect.outputs.hasTests == 'true'
+    # Runs vitest / jest / playwright / pytest
+
+  build:
+    needs: [detect, install, lint, typecheck, test]
+    if: needs.detect.outputs.hasBuild == 'true'
+    # Runs vite/next/tsc/go build/cargo build
+
+  deploy:
+    needs: [detect, build]
+    if: needs.detect.outputs.shouldDeploy == 'true'
+    environment: production
+    # Deploys to Vercel/Netlify/Fly/Railway/K8s/AWS`,
+};
+
+function renderFileTree() {
+  const tree = document.getElementById('fileTree');
+  const items = [
+    { label:'.ci/',            cls:'dir', indent:0 },
+    { label:'detect.js',       file:'.ci/detect.js',         indent:1 },
+    { label:'affected.js',     file:'.ci/affected.js',       indent:1 },
+    { label:'stages/',         cls:'dir', indent:1 },
+    { label:'lint.js',         file:'.ci/stages/lint.js',    indent:2 },
+    { label:'test.js',         file:'.ci/stages/test.js',    indent:2 },
+    { label:'build.js',        file:'.ci/stages/build.js',   indent:2 },
+    { label:'deploy.js',       file:'.ci/stages/deploy.js',  indent:2 },
+    { label:'security.js',     file:'.ci/stages/security.js',indent:2 },
+    { label:'notify.js',       file:'.ci/stages/notify.js',  indent:2 },
+    { label:'report.js',       file:'.ci/stages/report.js',  indent:2 },
+    { label:'.github/',        cls:'dir', indent:0 },
+    { label:'workflows/',      cls:'dir', indent:1 },
+    { label:'adaptive.yml',    file:'.github/workflows/adaptive.yml', indent:2 },
+    { label:'relay/',          cls:'dir', indent:0 },
+    { label:'server.js',       file:'relay/server.js',       indent:1 },
+  ];
+
+  const iconMap = { js:'📜', yml:'⚙️', dir:'📂' };
+
+  tree.innerHTML = items.map(item => {
+    const ext = item.file ? item.file.split('.').pop() : 'dir';
+    const icon = iconMap[ext] || '📄';
+    const clickable = item.file ? `onclick="previewFile('${item.file}')"` : '';
+    return `<div class="tree-item ${item.cls||''} indent-${item.indent}" ${clickable}>
+      <span class="fi">${icon}</span>${item.label}
+    </div>`;
+  }).join('');
+}
+
+function previewFile(path) {
+  document.getElementById('fileViewTitle').textContent = `📄 ${path}`;
+  const content = FILES[path] || `# ${path}\n\n[Full source in downloaded files]`;
+  document.getElementById('fileViewContent').textContent = content;
+}
+
+// ─── Secrets table ─────────────────────────────────────────────────────────────
+
+const SECRETS = [
+  { name:'VERCEL_TOKEN',       when:'Vercel deploys' },
+  { name:'VERCEL_ORG_ID',      when:'Vercel deploys' },
+  { name:'VERCEL_PROJECT_ID',  when:'Vercel deploys' },
+  { name:'FLY_API_TOKEN',      when:'Fly.io deploys' },
+  { name:'RAILWAY_TOKEN',      when:'Railway deploys' },
+  { name:'NETLIFY_AUTH_TOKEN', when:'Netlify deploys' },
+  { name:'NETLIFY_SITE_ID',    when:'Netlify deploys' },
+  { name:'RENDER_API_KEY',     when:'Render deploys' },
+  { name:'SLACK_WEBHOOK',      when:'Slack notifications' },
+  { name:'DISCORD_WEBHOOK',    when:'Discord notifications' },
+  { name:'SNYK_TOKEN',         when:'Snyk security scanning' },
+  { name:'RELAY_URL',          when:'Powering the Live dashboard tab (optional)' },
+  { name:'RELAY_SECRET',       when:'Authenticating webhook calls to your relay (optional)' },
+];
+
+function renderSecrets() {
+  document.getElementById('secretsTable').innerHTML = SECRETS.map(s => `
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:9px 0;font-family:var(--font-mono);font-size:12px;color:var(--teal)">${s.name}</td>
+      <td style="padding:9px 0;font-size:13px;color:var(--muted)">${s.when}</td>
+    </tr>
+  `).join('');
+}
+
+// ─── Live Dashboard ─────────────────────────────────────────────────────────
+
+let relayUrl = null;
+let relayPollTimer = null;
+let relayEventSource = null;
+let relayLastRuns = [];
+
+const RELAY_STORAGE_KEY = 'adaptive-cicd-relay-url';
+
+function loadStoredRelay() {
+  try { return localStorage.getItem(RELAY_STORAGE_KEY); } catch { return null; }
+}
+function storeRelay(url) {
+  try { localStorage.setItem(RELAY_STORAGE_KEY, url); } catch {}
+}
+function clearStoredRelay() {
+  try { localStorage.removeItem(RELAY_STORAGE_KEY); } catch {}
+}
+
+function showRelayError(msg) {
+  const el = document.getElementById('relayError');
+  el.textContent = msg;
+  el.style.display = '';
+}
+function hideRelayError() {
+  document.getElementById('relayError').style.display = 'none';
+}
+
+async function connectRelay() {
+  const input = document.getElementById('relayUrlInput').value.trim().replace(/\/$/, '');
+  if (!input) { showRelayError('Enter a relay URL first.'); return; }
+  if (!/^https?:\/\//.test(input)) { showRelayError('URL must start with http:// or https://'); return; }
+
+  hideRelayError();
+
+  try {
+    const res = await fetch(input + '/status', { method: 'GET' });
+    if (!res.ok) throw new Error(`Relay responded with ${res.status}`);
+    const data = await res.json();
+
+    relayUrl = input;
+    storeRelay(input);
+    relayLastRuns = data.runs || [];
+
+    document.getElementById('liveSetup').style.display = 'none';
+    document.getElementById('liveConnected').style.display = '';
+    document.getElementById('liveRelayUrl').textContent = relayUrl;
+    document.getElementById('tabbtn-live').innerHTML = '🟢 Live <span class="live-banner" style="margin-left:4px">ON</span>';
+
+    renderLiveRuns();
+    startLivePolling();
+
+  } catch (e) {
+    showRelayError(
+      `Couldn't reach that relay (${e.message}). Check: the URL is correct, ` +
+      `the relay is deployed and running, and it allows CORS (the provided server.js does this by default).`
+    );
+  }
+}
+
+function disconnectRelay() {
+  stopLivePolling();
+  relayUrl = null;
+  relayLastRuns = [];
+  clearStoredRelay();
+  document.getElementById('liveSetup').style.display = '';
+  document.getElementById('liveConnected').style.display = 'none';
+  document.getElementById('tabbtn-live').innerHTML = '🟢 Live';
+  document.getElementById('relayUrlInput').value = '';
+}
+
+function startLivePolling() {
+  stopLivePolling();
+
+  // Prefer SSE (instant updates); fall back to polling if it fails.
+  try {
+    relayEventSource = new EventSource(relayUrl + '/stream');
+    relayEventSource.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'hello') {
+          relayLastRuns = msg.runs || [];
+          renderLiveRuns();
+        } else if (msg.type === 'update') {
+          const idx = relayLastRuns.findIndex(r => r.runId === msg.run.runId);
+          if (idx >= 0) relayLastRuns[idx] = msg.run; else relayLastRuns.unshift(msg.run);
+          renderLiveRuns();
+        }
+        document.getElementById('liveConnState').textContent = 'live (streaming)';
+      } catch {}
+    };
+    relayEventSource.onerror = () => {
+      // SSE failed/unsupported by relay — fall back to polling
+      if (relayEventSource) { relayEventSource.close(); relayEventSource = null; }
+      document.getElementById('liveConnState').textContent = 'polling every 4s';
+      relayPollTimer = setInterval(pollRelayOnce, 4000);
+    };
+  } catch {
+    relayPollTimer = setInterval(pollRelayOnce, 4000);
+  }
+}
+
+function stopLivePolling() {
+  if (relayPollTimer) { clearInterval(relayPollTimer); relayPollTimer = null; }
+  if (relayEventSource) { relayEventSource.close(); relayEventSource = null; }
+}
+
+async function pollRelayOnce() {
+  if (!relayUrl) return;
+  try {
+    const res = await fetch(relayUrl + '/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    relayLastRuns = data.runs || [];
+    renderLiveRuns();
+  } catch {
+    document.getElementById('liveConnState').textContent = 'reconnecting…';
+  }
+}
+
+const LIVE_JOB_ORDER = ['detect','install','lint','typecheck','test','security','build','docker','deploy','notify'];
+const LIVE_JOB_ICON = { detect:'🔍', install:'📦', lint:'🔎', typecheck:'🔷', test:'🧪', security:'🛡️', build:'🔨', docker:'🐳', deploy:'🚀', notify:'📣' };
+
+function renderLiveRuns() {
+  const container = document.getElementById('liveRuns');
+  const empty = document.getElementById('liveEmpty');
+
+  if (!relayLastRuns.length) {
+    empty.style.display = '';
+    container.innerHTML = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  container.innerHTML = relayLastRuns.map(run => {
+    const statusClass = run.status === 'success' ? 'success' : run.status === 'failed' ? 'failed' : 'running';
+    const jobs = LIVE_JOB_ORDER
+      .filter(j => run.jobs && run.jobs[j])
+      .map(j => {
+        const jd = run.jobs[j];
+        const cls = jd.status === 'success' ? 'success' : jd.status === 'failed' ? 'failed' : jd.status === 'running' ? 'running' : 'queued';
+        return `<div class="run-job-pill ${cls}">${LIVE_JOB_ICON[j]||'●'} ${j}${jd.detail ? ' · '+escapeHtml(jd.detail) : ''}</div>`;
+      }).join('');
+
+    const timeAgo = run.updatedAt ? relativeTime(run.updatedAt) : '';
+
+    return `
+      <div class="run-card">
+        <div class="run-card-header">
+          <span class="run-status-dot ${statusClass}"></span>
+          <strong style="font-size:13px">${escapeHtml(run.repo || 'unknown repo')}</strong>
+          <span class="run-meta">${escapeHtml(run.branch||'?')} · ${escapeHtml(run.commit||'')}</span>
+          <span class="run-meta" style="margin-left:auto">${timeAgo}</span>
+          ${run.runUrl ? `<a class="run-meta" href="${run.runUrl}" target="_blank" rel="noopener">View on GitHub →</a>` : ''}
+        </div>
+        <div class="run-jobs">${jobs || '<span style="font-size:12px;color:var(--muted)">waiting for first job report…</span>'}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function relativeTime(ts) {
+  const diff = Math.max(0, Date.now() - ts);
+  const s = Math.floor(diff/1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s/60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m/60);
+  return `${h}h ago`;
+}
+
+// Live clock refresh for "Xs ago" labels
+setInterval(() => { if (relayUrl) renderLiveRuns(); }, 15000);
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+renderSecrets();
+
+// Auto-reconnect if a relay URL was saved from a previous visit
+(function initLive() {
+  const saved = loadStoredRelay();
+  if (saved) {
+    document.getElementById('relayUrlInput').value = saved;
+    connectRelay();
+  }
+})();
+</script>
+</body>
+</html>
