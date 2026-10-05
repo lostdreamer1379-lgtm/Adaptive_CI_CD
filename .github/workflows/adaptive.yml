@@ -168,7 +168,14 @@ jobs:
 
       - name: Install (npm)
         if: needs.detect.outputs.packageManager == 'npm'
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f package.json ]; then
+            npm install
+          else
+            echo "No package.json/package-lock.json at repository root; skipping npm install."
+          fi
 
       - name: Install (pnpm)
         if: needs.detect.outputs.packageManager == 'pnpm'
